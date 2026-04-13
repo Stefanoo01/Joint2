@@ -10,17 +10,19 @@ import torch.nn.functional as F
 # 1. Add RSBench-code to PYTHONPATH so we can import its modules
 # We assume the user executes from `Joint2/dilp_st` or `Joint2`
 current_dir = os.path.abspath(os.path.dirname(__file__))
-rsbench_path = os.path.join(current_dir, "..", "rsbench-code", "rsseval")
-sys.path.append(rsbench_path)
+rsbench_rss_path = os.path.join(current_dir, "..", "rsbench-code", "rsseval", "rss")
+
+# Add to sys.path so 'datasets' can be imported
+sys.path.append(rsbench_rss_path)
 
 # RSBench imports
-from rss.datasets.shortcutmnist import SHORTMNIST
-from rss.backbones.addmnist_single import MNISTSingleEncoder
+from datasets.shortcutmnist import SHORTMNIST
+from backbones.addmnist_single import MNISTSingleEncoder
 
 # DILP imports
-from configs.mnist_add import build_mnist_add_problem
-from learning.model import ILPLearner, TrainConfig
-from models.nesy_wrapper import NeSyWrapper
+from .configs.mnist_add import build_mnist_add_problem
+from .learning.model import ILPLearner, TrainConfig
+from .models.nesy_wrapper import NeSyWrapper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +66,7 @@ def main():
     # Provide the necessary mock arguments for the RSBench Dataset constructor
     ds_args = MockArgs(
         model="mnistnn",  # bypass their internal CBM logic
+        task="addition",
         c_sup=0,
         which_c=-1,
         batch_size=args.batch_size,
@@ -90,8 +93,8 @@ def main():
         lr=args.dilp_lr,
         program_size=1,            # we only need 1 clause for `add`
         inference_steps=2,         # steps=2 is enough: add <- digit, digit, plus
-        temp_start=args.temp_start,
-        temp_end=args.temp_end,
+        temperature_start=args.temp_start,
+        temperature_end=args.temp_end,
         entropy_coeff=args.entropy_coeff,
         n_beam=5,                  # Fast beam search 
     )
@@ -136,7 +139,7 @@ def main():
             
             # Gather the probabilities of the correct targets
             # targets is [B]
-            gathered_probs = target_probs.gather(1, targets.unsqueeze(-1)).squeeze(-1)
+            gathered_probs = target_probs.gather(1, targets.unsqueeze(-1).long()).squeeze(-1)
             loss = - torch.log(gathered_probs.clamp(min=1e-7)).mean()
             
             # Entropy regularisation over clause weights

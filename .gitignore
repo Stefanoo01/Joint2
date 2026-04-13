@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+.conda/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Datasets and Checkpoints (PyTorch / Numpy)
+*.pt
+*.pth
+*.npy
+data/
+raw/
+*indexes.pt
+2mnist_10digits/
+rsbench-code/rsseval/rss/data/
+rsbench-code/rsseval/rss/datasets/utils/2mnist_10digits/
+
+# Jupyter
+.ipynb_checkpoints/

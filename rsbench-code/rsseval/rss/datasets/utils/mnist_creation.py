@@ -97,11 +97,10 @@ class nMNIST(Dataset):
         Returns images and labels
         """
         try:
-            # print("Loading data...")
-            data = load(path)
-            # print("Loaded.")
-        except:
-            print("No dataset found.")
+            data = load(path, weights_only=False)
+        except Exception as e:
+            print(f"Dataset load error: {e}")
+            raise e
 
         images = data[split]["images"]
         labels = data[split]["labels"]
@@ -167,7 +166,7 @@ def check_dataset(n_digits, data_folder, data_file, dataset_dim):
     Path(data_folder).mkdir(parents=True, exist_ok=True)
     data_path = os.path.join(data_folder, data_file)
     try:
-        load(data_path)
+        load(data_path, weights_only=False)
     except:
         print("No dataset found.")
         # Define dataset dimension so to have teh same number of worlds
@@ -255,7 +254,8 @@ def load_data(data_file, data_folder, c_sup=1, which_c=[-1], args=None):
     val_set = nMNIST("val", data_path=data_path, args=args)
     test_set = nMNIST("test", data_path=data_path, args=args)
 
-    r_seq = np.load("data/rn.npy")
+    rss_folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    r_seq = np.load(os.path.join(rss_folder, "data", "rn.npy"))
     # Generate deterministic random sequence
     # r_seq = generate_r_seq(len(train_set))
 
