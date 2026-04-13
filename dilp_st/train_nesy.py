@@ -129,18 +129,14 @@ def main():
         for batch_idx, (images, targets, _) in enumerate(train_loader):
             images, targets = images.to(device), targets.to(device)
             optimizer.zero_grad()
-            
             # target_probs is [B, 19] bounding the probability for each sum from 0 to 18
-            # The values are smoothly clamped to [0, 1] by DILP SoftOR
             target_probs = model(images, temperature=temperature)
             
-            # Since probabilities are in [0, 1] and sum roughly to 1 (not strictly guaranteed in fuzzy logic but bounded)
-            # We use NLL Loss over the log probabilities: L = - log( p_true + eps )
+            # We want the true sum to have truth value 1.0, and ALL other sums to have truth value 0.0
+            targets_one_hot = F.one_hot(targets.long(), num_classes=19).float()
             
-            # Gather the probabilities of the correct targets
-            # targets is [B]
-            gathered_probs = target_probs.gather(1, targets.unsqueeze(-1).long()).squeeze(-1)
-            loss = - torch.log(gathered_probs.clamp(min=1e-7)).mean()
+            # Binary Cross Entropy forces the correct atom to 1.0 and ALL others to 0.0
+            loss = F.binary_cross_entropy(target_probs.clamp(1e-7, 1.0 - 1e-7), targets_one_hot)
             
             # Entropy regularisation over clause weights
             if config.entropy_coeff > 0:
