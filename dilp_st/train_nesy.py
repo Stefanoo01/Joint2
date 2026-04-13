@@ -180,6 +180,34 @@ def main():
         
         logger.info(f"Epoch {epoch:2d}/{args.epochs} [{train_time:.1f}s] | Temp: {temperature:.3f} | Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
         
+        # --- DEBUG LOGGING ---
+        logger.info("  === Learned Program (Current State) ===")
+        program = learner.extract_program_with_probabilities(temperature=temperature)
+        for clause, prob in program:
+            if prob > 0.05:  # Only print clauses with meaningful weight
+                logger.info(f"    {clause}  (p={prob:.4f})")
+                
+        # --- CONCEPT MAPPING VIEW ---
+        # Pick one batch from validation to peek inside the CBM
+        viz_images, viz_targets, viz_concepts = next(iter(val_loader))
+        viz_images = viz_images.to(device)
+        with torch.no_grad():
+            if viz_images.size(-1) > 28:
+                xs = torch.split(viz_images, viz_images.size(-1) // 2, dim=-1)
+            else:
+                xs = [viz_images[:, i] for i in range(2)]
+                
+            lc1, _, _ = model.encoder(xs[0])
+            lc2, _, _ = model.encoder(xs[1])
+            pred_digits1 = F.softmax(lc1, dim=1).argmax(dim=1)
+            pred_digits2 = F.softmax(lc2, dim=1).argmax(dim=1)
+            
+        logger.info("  --- Concept Shortcut Analysis (First 5 Val samples) ---")
+        logger.info(f"    True Digits    : {viz_concepts[:5, 0].tolist()} + {viz_concepts[:5, 1].tolist()}")
+        logger.info(f"    Learned Digits : {pred_digits1[:5].tolist()} + {pred_digits2[:5].tolist()}")
+        logger.info(f"    True Sum Target: {viz_targets[:5].tolist()}")
+
+        
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             
