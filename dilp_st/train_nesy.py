@@ -21,6 +21,7 @@ from backbones.addmnist_single import MNISTSingleEncoder
 
 # DILP imports
 from .configs.mnist_add import build_mnist_add_problem
+from .configs.mnist_sum_parity import build_mnist_sum_parity_problem
 from .learning.model import ILPLearner, TrainConfig
 from .models.nesy_wrapper import NeSyWrapper
 
@@ -39,6 +40,8 @@ class MockArgs:
 
 def main():
     parser = argparse.ArgumentParser(description="NeSy Joint Training: DILP + CBM")
+    parser.add_argument("--task", type=str, default="addition", choices=["addition", "sum_parity"])
+    parser.add_argument("--program-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--dilp-lr", type=float, default=1e-2)
@@ -86,17 +89,26 @@ def main():
     train_loader, val_loader, test_loader = dataset.get_data_loaders()
 
     # 2. Build DILP ILP problem
-    logger.info("Initializing DILP Problem & Graph...")
-    problem = build_mnist_add_problem()
+    logger.info(f"Initializing DILP Problem & Graph for task: {args.task}...")
+    if args.task == "addition":
+        problem = build_mnist_add_problem()
+        num_classes = 19
+    else:
+        problem = build_mnist_sum_parity_problem()
+        num_classes = 2
+
     config = TrainConfig(
         epochs=args.epochs,
         lr=args.dilp_lr,
-        program_size=1,            # we only need 1 clause for `add`
+        program_size=args.program_size,
         inference_steps=2,         # steps=2 is enough: add <- digit, digit, plus
         temperature_start=args.temp_start,
         temperature_end=args.temp_end,
         entropy_coeff=args.entropy_coeff,
-        n_beam=5,                  # Fast beam search 
+        n_beam=300,
+        t_beam=0,                  # Disable buggy unbounded beam search since we use strict Program Templates now!
+        max_depth=4,
+        max_body=3,
     )
     learner = ILPLearner(problem, config, device=device)
 
@@ -127,13 +139,16 @@ def main():
 
         t0 = time.time()
         for batch_idx, (images, targets, _) in enumerate(train_loader):
+            if args.task == "sum_parity":
+                targets = targets % 2
+                
             images, targets = images.to(device), targets.to(device)
             optimizer.zero_grad()
-            # target_probs is [B, 19] bounding the probability for each sum from 0 to 18
+            # target_probs is [B, num_classes]
             target_probs = model(images, temperature=temperature)
             
-            # We want the true sum to have truth value 1.0, and ALL other sums to have truth value 0.0
-            targets_one_hot = F.one_hot(targets.long(), num_classes=19).float()
+            # We want the true target to have truth value 1.0, and ALL other values to have truth value 0.0
+            targets_one_hot = F.one_hot(targets.long(), num_classes=num_classes).float()
             
             # Binary Cross Entropy forces the correct atom to 1.0 and ALL others to 0.0
             loss = F.binary_cross_entropy(target_probs.clamp(1e-7, 1.0 - 1e-7), targets_one_hot)
@@ -164,23 +179,46 @@ def main():
         model.eval()
         val_correct = 0
         val_total = 0
+        concept_correct = 0
+        concept_total = 0
         with torch.no_grad():
-            for images, targets, _ in val_loader:
+            for images, targets, concepts in val_loader:
+                if args.task == "sum_parity":
+                    targets = targets % 2
+                    
                 images, targets = images.to(device), targets.to(device)
                 target_probs = model(images, temperature=args.temp_end)
                 preds = target_probs.argmax(dim=1)
                 val_correct += (preds == targets).sum().item()
                 val_total += len(targets)
+                
+                # Concept Accuracy eval (checking if CNN learns 0-9 correctly)
+                if images.size(-1) > 28:
+                    xs = torch.split(images, images.size(-1) // 2, dim=-1)
+                else:
+                    xs = [images[:, i] for i in range(2)]
+                
+                lc1, _, _ = model.encoder(xs[0])
+                lc2, _, _ = model.encoder(xs[1])
+                pred_c1 = lc1.squeeze(1).argmax(dim=-1)
+                pred_c2 = lc2.squeeze(1).argmax(dim=-1)
+                
+                concepts = concepts.to(device)
+                concept_correct += (pred_c1 == concepts[:, 0]).sum().item()
+                concept_correct += (pred_c2 == concepts[:, 1]).sum().item()
+                concept_total += len(targets) * 2
         
         val_acc = val_correct / val_total
+        concept_acc = concept_correct / concept_total
         
-        logger.info(f"Epoch {epoch:2d}/{args.epochs} [{train_time:.1f}s] | Temp: {temperature:.3f} | Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
+        logger.info(f"Epoch {epoch:2d}/{args.epochs} [{train_time:.1f}s] | Temp: {temperature:.3f} | Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Concept Acc: {concept_acc:.4f}")
         
         # --- DEBUG LOGGING ---
         logger.info("  === Learned Program (Current State) ===")
         program = learner.extract_program_with_probabilities()
+        program.sort(key=lambda x: x[1], reverse=True) # Sort by probability descending
         for clause, prob in program:
-            if prob > 0.05:  # Only print clauses with meaningful weight
+            if prob > 0.01:  # Print all clauses with >1% weight
                 logger.info(f"    {clause}  (p={prob:.4f})")
                 
         # --- CONCEPT MAPPING VIEW ---
@@ -199,9 +237,11 @@ def main():
             pred_digits2 = F.softmax(lc2.squeeze(1), dim=-1).argmax(dim=-1)
             
         logger.info("  --- Concept Shortcut Analysis (First 5 Val samples) ---")
-        logger.info(f"    True Digits    : {viz_concepts[:5, 0].tolist()} + {viz_concepts[:5, 1].tolist()}")
-        logger.info(f"    Learned Digits : {pred_digits1[:5].tolist()} + {pred_digits2[:5].tolist()}")
-        logger.info(f"    True Sum Target: {viz_targets[:5].tolist()}")
+        if args.task == "sum_parity":
+            viz_targets = viz_targets % 2
+        logger.info(f"    True Digits    : {viz_concepts[:10, 0].tolist()} + {viz_concepts[:10, 1].tolist()}")
+        logger.info(f"    Learned Digits : {pred_digits1[:10].tolist()} + {pred_digits2[:10].tolist()}")
+        logger.info(f"    True Target    : {viz_targets[:10].tolist()}")
 
         
         if val_acc > best_val_acc:

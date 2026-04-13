@@ -72,9 +72,42 @@ def build_mnist_add_problem() -> ILPProblem:
 
     # Initial clauses for beam search (the template structure).
     # We want to learn add(I1, I2, Y)
-    initial_clauses = [
-        Clause(Atom("add", (img1, img2, Variable("z")))),
-    ]
+    # Generate ALL possible clauses conforming to the Program Template:
+    # add(img1, img2, Z) <- P_1(img1, X), P_2(img2, Y), P_3(X, Y, Z)
+    # This precisely matches how Differentiable ILP defines the search space.
+    initial_clauses = []
+    
+    # Also add the empty body for noise testing
+    initial_clauses.append(Clause(Atom("add", (img1, img2, Variable("z")))))
+
+    X = Variable("X")
+    Y = Variable("Y")
+    Z = Variable("z")
+    
+    # We plug in all available predicates of matching arities
+    preds_arity_2 = [p.name for p in language.predicates if p.arity == 2]
+    preds_arity_3 = ["plus"]   # Prevent degenerate recursive "add" without base case from poisoning Softmax
+    
+    
+    for p1 in preds_arity_2:
+        for p2 in preds_arity_2:
+            for p3 in preds_arity_3:
+                # add(img1, img2, Z) <- p1(img1, X), p2(img2, Y), p3(X,Y,Z)
+                head = Atom("add", (img1, img2, Z))
+                body = (
+                    Atom(p1, (img1, X)),
+                    Atom(p2, (img2, Y)),
+                    Atom(p3, (X, Y, Z)),
+                )
+                initial_clauses.append(Clause(head, body))
+                
+                # Symmetrical permutation
+                body_sym = (
+                    Atom(p1, (img2, X)),
+                    Atom(p2, (img1, Y)),
+                    Atom(p3, (X, Y, Z)),
+                )
+                initial_clauses.append(Clause(head, body_sym))
 
     return ILPProblem(
         positive_examples=positive,
