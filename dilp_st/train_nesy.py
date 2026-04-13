@@ -182,7 +182,7 @@ def main():
         
         # --- DEBUG LOGGING ---
         logger.info("  === Learned Program (Current State) ===")
-        program = learner.extract_program_with_probabilities(temperature=temperature)
+        program = learner.extract_program_with_probabilities()
         for clause, prob in program:
             if prob > 0.05:  # Only print clauses with meaningful weight
                 logger.info(f"    {clause}  (p={prob:.4f})")
