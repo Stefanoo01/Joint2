@@ -199,8 +199,8 @@ def main():
                 
             lc1, _, _ = model.encoder(xs[0])
             lc2, _, _ = model.encoder(xs[1])
-            pred_digits1 = F.softmax(lc1, dim=1).argmax(dim=1)
-            pred_digits2 = F.softmax(lc2, dim=1).argmax(dim=1)
+            pred_digits1 = F.softmax(lc1.squeeze(1), dim=-1).argmax(dim=-1)
+            pred_digits2 = F.softmax(lc2.squeeze(1), dim=-1).argmax(dim=-1)
             
         logger.info("  --- Concept Shortcut Analysis (First 5 Val samples) ---")
         logger.info(f"    True Digits    : {viz_concepts[:5, 0].tolist()} + {viz_concepts[:5, 1].tolist()}")

@@ -28,8 +28,8 @@ class NeSyWrapper(nn.Module):
     def _normalize_concepts(self, cs: torch.Tensor) -> torch.Tensor:
         """Apply softmax to concept logits."""
         # cs is [B, 2, 10]
-        prob_digit1 = nn.Softmax(dim=1)(cs[:, 0, :])
-        prob_digit2 = nn.Softmax(dim=1)(cs[:, 1, :])
+        prob_digit1 = nn.Softmax(dim=-1)(cs[:, 0, :])
+        prob_digit2 = nn.Softmax(dim=-1)(cs[:, 1, :])
         return torch.stack([prob_digit1, prob_digit2], dim=1)
 
     def forward(self, x: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
@@ -49,9 +49,9 @@ class NeSyWrapper(nn.Module):
                 raise ValueError(f"Unexpected image shape {x.shape}")
         
         for i in range(self.n_images):
-            # rsbench encoder returns (c, mu, logvar)
+            # rsbench encoder returns (c, mu, logvar). c is [B, 1, 10]
             lc, _, _ = self.encoder(xs[i])
-            cs.append(lc)
+            cs.append(lc.squeeze(1))
             
         # len = 2, each is [B, 10]
         # stack to [B, 2, 10]
